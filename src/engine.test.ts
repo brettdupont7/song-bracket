@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 import {
   type Song,
   type Tournament,
+  canRedraw,
   canUndo,
   currentRound,
   deal,
+  dealGroups,
   decide,
   eliminations,
   pickPlace,
+  redraw,
   placeCandidates,
   picksLeft,
   picksMade,
@@ -67,6 +70,53 @@ describe('deal', () => {
     const sizes = groups.map((g) => g.length)
     expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1)
     for (let i = 0; i < 10; i++) expect(groups.some((g) => g.includes(`w${i}`) && g.includes(`x${i}`))).toBe(false)
+  })
+})
+
+describe('dealGroups', () => {
+  // 347 winners, 120 of them with a wildcard (6 with two), like a real round 1.
+  const clusters = Array.from({ length: 347 }, (_, i) =>
+    i < 114 ? [`w${i}`, `c${i}`, ...(i < 6 ? [`d${i}`] : [])] : [`w${i}`],
+  )
+
+  it('spreads wildcards and group sizes evenly', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const groups = dealGroups(clusters, 64, seeded(seed))
+      const sizes = groups.map((g) => g.length)
+      const wild = groups.map((g) => g.filter((id) => !id.startsWith('w')).length)
+      expect(sizes.reduce((a, b) => a + b)).toBe(467)
+      expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(1)
+      expect(Math.max(...wild) - Math.min(...wild)).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('never puts a wildcard with the song it advanced with', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const groups = dealGroups(clusters, 64, seeded(seed))
+      for (const g of groups) {
+        const ids = g.map((id) => id.slice(1))
+        expect(new Set(ids).size).toBe(ids.length)
+      }
+    }
+  })
+})
+
+describe('redraw', () => {
+  it('redraws a round with no picks from the previous round', () => {
+    const rng = seeded(21)
+    let t = startTournament(songs(300), rng)
+    expect(canRedraw(t)).toBe(false)
+    currentRound(t).groups.forEach((g, i) => {
+      t = decide(t, i, g.songs[0], g.songs.length > 3 && i % 3 === 0 ? [g.songs[1]] : [], rng)
+    })
+    const before = currentRound(t)
+    expect(canRedraw(t)).toBe(true)
+    const after = currentRound(redraw(t, rng))
+    expect(after.groups.flatMap((g) => g.songs).sort()).toEqual(before.groups.flatMap((g) => g.songs).sort())
+    expect(after.groups.map((g) => g.songs)).not.toEqual(before.groups.map((g) => g.songs))
+    t = decide(t, 0, currentRound(t).groups[0].songs[0], [], rng)
+    expect(canRedraw(t)).toBe(false)
+    expect(() => redraw(t, rng)).toThrow()
   })
 })
 

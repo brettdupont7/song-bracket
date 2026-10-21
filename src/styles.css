@@ -215,6 +215,12 @@ table.plan {
   margin-bottom: 6px;
 }
 
+.progress-text .redraw {
+  margin-left: auto;
+  font-size: 13px;
+  padding: 3px 10px;
+}
+
 .wild-count {
   color: var(--wild);
 }

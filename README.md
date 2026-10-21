@@ -5,7 +5,7 @@ Put every song in a playlist into a tournament to find your favourite song right
 ## How it works
 
 1. **Import a playlist.** Export a Spotify playlist as CSV with [Exportify](https://github.com/watsonbox/exportify) and upload or paste it. Plain text works too, one `Artist - Title` per line. Duplicates are skipped.
-2. **Group rounds.** You see a few songs at a time and pick your favourite. If another song in the group is too good to lose, mark it as a **wildcard** and it advances too (up to all but one song in the group). Wildcards' groups are spread out next round, so a song never meets the song it advanced with straight away.
+2. **Group rounds.** You see a few songs at a time and pick your favourite. If another song in the group is too good to lose, mark it as a **wildcard** and it advances too (up to all but one song in the group). The next round deals group winners first and wildcards second, so every group gets about the same number of wildcards, and a song never meets the song it advanced with straight away. **Redraw groups** (next to the progress bar) shuffles a round again, as long as you haven't picked in it yet.
    - Groups of 4 until 512 or fewer songs remain, then one round of 64 groups (5–8 songs each) to land on 64.
    - If wildcards leave more than 64, a short **play-in** of 1-on-1s trims the field to exactly 64.
 3. **Bracket.** The last 64 play 1-on-1, single elimination. Songs that advanced together start in opposite halves.

@@ -9,6 +9,7 @@ interface State {
   decide: (group: number, winner: string, wildcards: string[]) => void
   pickPlace: (song: string) => void
   undo: () => void
+  redraw: () => void
   load: (t: Tournament) => void
   reset: () => void
 }
@@ -27,6 +28,7 @@ export const useStore = create<State>()(
           update((t) => engine.decide(t, group, winner, wildcards, Math.random)),
         pickPlace: (song) => update((t) => engine.pickPlace(t, song)),
         undo: () => update(engine.undo),
+        redraw: () => update((t) => engine.redraw(t, Math.random)),
         load: (tournament) => set({ tournament }),
         reset: () => set({ tournament: null }),
       }

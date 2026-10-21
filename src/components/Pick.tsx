@@ -3,6 +3,7 @@ import {
   type Group,
   type Round,
   type Tournament,
+  canRedraw,
   canUndo,
   currentRound,
   picksLeft,
@@ -17,6 +18,7 @@ export function Pick() {
   const t = useTournament()
   const decide = useStore((s) => s.decide)
   const undo = useStore((s) => s.undo)
+  const redraw = useStore((s) => s.redraw)
   const [playing, setPlaying] = useState<string | null>(null)
 
   const r = t.rounds.length - 1
@@ -44,6 +46,15 @@ export function Pick() {
           <span className="muted">
             {done.toLocaleString()} picks made · about {left.toLocaleString()} to go
           </span>
+          {canRedraw(t) && (
+            <button
+              className="redraw"
+              title="Shuffle this round's groups again. Only possible before your first pick in the round."
+              onClick={() => confirm(`Redraw the groups for ${roundName(t, r)}?`) && redraw()}
+            >
+              Redraw groups
+            </button>
+          )}
         </div>
         <div className="bar">
           <div style={{ width: `${(100 * done) / (done + left)}%` }} />

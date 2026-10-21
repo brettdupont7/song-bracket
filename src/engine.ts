@@ -80,6 +80,48 @@ export function deal(clusters: string[][], count: number, rng: Rng): string[][] 
   return groups
 }
 
+/**
+ * Deals a group round: each cluster's first song (the group winner) is dealt first,
+ * then the wildcards, so every group gets about the same number of each. A wildcard
+ * never shares a group with the song it advanced with.
+ */
+export function dealGroups(clusters: string[][], count: number, rng: Rng): string[][] {
+  const order = shuffle(clusters, rng)
+  const clusterOf = new Map<string, number>()
+  order.forEach((c, i) => c.forEach((id) => clusterOf.set(id, i)))
+  const groups: string[][] = Array.from({ length: count }, () => [])
+  const leads = order.map((c) => c[0])
+  leads.forEach((id, i) => groups[i % count].push(id))
+  const extras = shuffle(
+    order.flatMap((c) => c.slice(1)),
+    rng,
+  )
+  extras.forEach((id, k) => groups[(leads.length + k) % count].push(id))
+
+  // Swap any wildcard that landed with a song from its own cluster for one elsewhere.
+  const clash = (g: string[], id: string) => g.some((x) => x !== id && clusterOf.get(x) === clusterOf.get(id))
+  const isExtra = new Set(extras)
+  for (let g = 0; g < count; g++) {
+    for (const id of groups[g].filter((x) => isExtra.has(x) && clash(groups[g], x))) {
+      for (let h = 0; h < count; h++) {
+        if (h === g) continue
+        const other = groups[h].find(
+          (y) =>
+            isExtra.has(y) &&
+            !groups[g].some((x) => x !== id && clusterOf.get(x) === clusterOf.get(y)) &&
+            !groups[h].some((x) => x !== y && clusterOf.get(x) === clusterOf.get(id)),
+        )
+        if (other) {
+          groups[g][groups[g].indexOf(id)] = other
+          groups[h][groups[h].indexOf(other)] = id
+          break
+        }
+      }
+    }
+  }
+  return groups
+}
+
 function bitReverse(i: number, bits: number): number {
   let r = 0
   for (let b = 0; b < bits; b++) r = (r << 1) | ((i >> b) & 1)
@@ -97,7 +139,7 @@ function drawRound(clusters: string[][], rng: Rng): Round | string {
   const n = clusters.reduce((sum, c) => sum + c.length, 0)
   if (n === 1) return clusters.flat()[0]
   const count = groupCountFor(n)
-  if (count !== null) return { kind: 'groups', groups: makeGroups(deal(clusters, count, rng)) }
+  if (count !== null) return { kind: 'groups', groups: makeGroups(dealGroups(clusters, count, rng)) }
   // Bit-reversing the dealt order puts neighbours (a winner and its wildcard) in
   // opposite halves of the bracket and spreads any byes evenly.
   const matches = nextPow2(n) / 2
@@ -182,6 +224,20 @@ export function decide(
   const rounds = t.rounds.slice()
   rounds[r] = { ...round, groups }
   return completeRound({ ...t, rounds, seq }, rng)
+}
+
+/** A round can be redrawn while none of its groups has been picked and it was drawn from a group round. */
+export function canRedraw(t: Tournament): boolean {
+  if (t.places.length || t.rounds.length < 2) return false
+  const prev = t.rounds[t.rounds.length - 2]
+  return prev.kind === 'groups' && currentRound(t).groups.every((g) => g.seq === undefined)
+}
+
+/** Draws the current round again from the songs that advanced from the previous one. */
+export function redraw(t: Tournament, rng: Rng): Tournament {
+  if (!canRedraw(t)) throw new Error('This round already has picks.')
+  const next = drawRound(t.rounds[t.rounds.length - 2].groups.map(advancers), rng) as Round
+  return { ...t, rounds: [...t.rounds.slice(0, -1), next] }
 }
 
 export function canUndo(t: Tournament): boolean {
