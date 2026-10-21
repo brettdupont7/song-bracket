@@ -22,7 +22,14 @@ export interface Group {
 export interface Round {
   kind: 'groups' | 'bracket'
   groups: Group[]
+  /** For a seeded bracket: its songs from seed 1 down. */
+  seeds?: string[]
+  /** For a seeded bracket or play-in: each song's rating when the round was drawn. */
+  ratings?: Record<string, number>
 }
+
+/** How the play-in and bracket are drawn: by ratings from your picks (the default), or at random. */
+export type Seeding = 'rated' | 'random'
 
 export interface Place {
   song: string
@@ -37,6 +44,7 @@ export interface Tournament {
   places: Place[]
   seq: number
   createdAt: string
+  seeding?: Seeding
 }
 
 export type Rng = () => number
@@ -134,12 +142,114 @@ function makeGroups(lists: string[][]): Group[] {
   )
 }
 
-/** Draws the next round from the songs that advanced, or returns the champion if one song is left. */
-function drawRound(clusters: string[][], rng: Rng): Round | string {
+/**
+ * Rates every song from all picks so far with a Bradley–Terry model: in each decided
+ * group the winner beat everyone else, and wildcards beat the songs that went out.
+ * Each song also gets one win and one loss against a 1500-rated anchor, which keeps
+ * unbeaten and winless songs finite. Ratings are on an Elo-like scale around 1500.
+ */
+export function ratings(t: Tournament): Map<string, number> {
+  const ids = Object.keys(t.songs)
+  const index = new Map(ids.map((id, i) => [id, i]))
+  const winner: number[] = []
+  const loser: number[] = []
+  for (const round of t.rounds)
+    for (const g of round.groups) {
+      if (!g.winner || g.songs.length < 2) continue
+      const tier = (s: string) => (s === g.winner ? 0 : g.wildcards.includes(s) ? 1 : 2)
+      for (const x of g.songs)
+        for (const y of g.songs)
+          if (tier(x) < tier(y)) {
+            winner.push(index.get(x)!)
+            loser.push(index.get(y)!)
+          }
+    }
+  const n = ids.length
+  const wins = new Float64Array(n).fill(1)
+  for (const i of winner) wins[i]++
+  let p = new Float64Array(n).fill(1)
+  // Minorization–maximization (Hunter, 2004): converges to the maximum-likelihood strengths.
+  for (let iter = 0; iter < 500; iter++) {
+    const denom = new Float64Array(n)
+    for (let i = 0; i < n; i++) denom[i] = 2 / (p[i] + 1)
+    for (let k = 0; k < winner.length; k++) {
+      const s = 1 / (p[winner[k]] + p[loser[k]])
+      denom[winner[k]] += s
+      denom[loser[k]] += s
+    }
+    const next = new Float64Array(n)
+    let change = 0
+    for (let i = 0; i < n; i++) {
+      next[i] = wins[i] / denom[i]
+      change = Math.max(change, Math.abs(Math.log(next[i] / p[i])))
+    }
+    p = next
+    if (change < 1e-7) break
+  }
+  return new Map(ids.map((id, i) => [id, 1500 + 400 * Math.log10(p[i])]))
+}
+
+/** Bracket positions for seeds 1..size, so that seed 1 meets seed `size` and the top two meet last. */
+export function seedOrder(size: number): number[] {
+  let order = [1]
+  while (order.length < size) {
+    const sum = order.length * 2 + 1
+    order = order.flatMap((s) => [s, sum - s])
+  }
+  return order
+}
+
+const byRating = (rating: Map<string, number>) => (x: string, y: string) =>
+  rating.get(y)! - rating.get(x)! || x.localeCompare(y, undefined, { numeric: true })
+
+const ratingsOf = (ids: string[], rating: Map<string, number>) =>
+  Object.fromEntries(ids.map((id) => [id, Math.round(rating.get(id)!)]))
+
+function seededBracket(ids: string[], rating: Map<string, number>): Round {
+  const seeds = ids.slice().sort(byRating(rating))
+  const order = seedOrder(nextPow2(seeds.length))
+  const lists = Array.from({ length: order.length / 2 }, (_, m) =>
+    [order[2 * m], order[2 * m + 1]].filter((s) => s <= seeds.length).map((s) => seeds[s - 1]),
+  )
+  return { kind: 'bracket', groups: makeGroups(lists), seeds, ratings: ratingsOf(seeds, rating) }
+}
+
+/**
+ * A seeded play-in: the highest-rated group winners get byes, and wildcards play the
+ * lowest-rated winners, best wildcard against worst winner. A wildcard never plays
+ * the song it advanced with.
+ */
+function seededPlayIn(clusters: string[][], rating: Map<string, number>): Round {
+  const leads = clusters.map((c) => c[0]).sort(byRating(rating))
+  const extras = clusters.flatMap((c) => c.slice(1)).sort(byRating(rating))
+  const clusterOf = new Map(clusters.flatMap((c, i) => c.map((id) => [id, i] as const)))
+  const slots = leads.map((id) => [id])
+  // Best wildcard → last slot, next → second-to-last, and so on.
+  const target = extras.map((_, k) => slots.length - 1 - k)
+  const clash = (k: number) => clusterOf.get(slots[target[k]][0]) === clusterOf.get(extras[k])
+  for (let k = 0; k < extras.length; k++)
+    if (clash(k)) {
+      const j = k + 1 < extras.length ? k + 1 : k - 1
+      if (j >= 0) [target[k], target[j]] = [target[j], target[k]]
+    }
+  extras.forEach((id, k) => slots[target[k]].push(id))
+  return { kind: 'groups', groups: makeGroups(slots), ratings: ratingsOf(clusters.flat(), rating) }
+}
+
+/**
+ * Draws the next round from the songs that advanced, or returns the champion if one
+ * song is left. With `rate`, the play-in and bracket are seeded by rating.
+ */
+function drawRound(clusters: string[][], rng: Rng, rate?: () => Map<string, number>): Round | string {
   const n = clusters.reduce((sum, c) => sum + c.length, 0)
   if (n === 1) return clusters.flat()[0]
   const count = groupCountFor(n)
-  if (count !== null) return { kind: 'groups', groups: makeGroups(dealGroups(clusters, count, rng)) }
+  if (count !== null) {
+    const isPlayIn = count === BRACKET_SIZE && n <= 2 * BRACKET_SIZE && clusters.length === count
+    if (rate && isPlayIn) return seededPlayIn(clusters, rate())
+    return { kind: 'groups', groups: makeGroups(dealGroups(clusters, count, rng)) }
+  }
+  if (rate) return seededBracket(clusters.flat(), rate())
   // Bit-reversing the dealt order puts neighbours (a winner and its wildcard) in
   // opposite halves of the bracket and spreads any byes evenly.
   const matches = nextPow2(n) / 2
@@ -179,6 +289,13 @@ export function wildcardLimit(round: Round, group: Group): number {
   return round.kind === 'groups' && group.songs.length >= 3 ? group.songs.length - 2 : 0
 }
 
+const rater = (t: Tournament) => (t.seeding === 'random' ? undefined : () => ratings(t))
+
+/** True for a round of 1-on-1s and byes that trims the field to the bracket. */
+export function isPlayIn(round: Round): boolean {
+  return round.kind === 'groups' && round.groups.every((g) => g.songs.length <= 2)
+}
+
 function completeRound(t: Tournament, rng: Rng): Tournament {
   const last = currentRound(t)
   if (!last.groups.every((g) => g.winner)) return t
@@ -195,7 +312,7 @@ function completeRound(t: Tournament, rng: Rng): Tournament {
             ),
           }
   } else {
-    next = drawRound(last.groups.map(advancers), rng)
+    next = drawRound(last.groups.map(advancers), rng, rater(t))
   }
   if (typeof next === 'string') return { ...t, places: [{ song: next, seq: t.seq }] }
   return { ...t, rounds: [...t.rounds, next] }
@@ -236,8 +353,26 @@ export function canRedraw(t: Tournament): boolean {
 /** Draws the current round again from the songs that advanced from the previous one. */
 export function redraw(t: Tournament, rng: Rng): Tournament {
   if (!canRedraw(t)) throw new Error('This round already has picks.')
-  const next = drawRound(t.rounds[t.rounds.length - 2].groups.map(advancers), rng) as Round
+  const next = drawRound(t.rounds[t.rounds.length - 2].groups.map(advancers), rng, rater(t)) as Round
   return { ...t, rounds: [...t.rounds.slice(0, -1), next] }
+}
+
+/** Seed numbers from a seeded bracket, if there is one. */
+export function seedNumbers(t: Tournament): Map<string, number> {
+  const seeds = t.rounds.find((r) => r.kind === 'bracket')?.seeds ?? []
+  return new Map(seeds.map((id, i) => [id, i + 1]))
+}
+
+/** Whether the current round is a play-in or bracket that hasn't started, so its seeding can still change. */
+export function canReseed(t: Tournament): boolean {
+  const round = currentRound(t)
+  return canRedraw(t) && (round.kind === 'bracket' || isPlayIn(round))
+}
+
+/** Chooses seeded or random draws for the play-in and bracket, redrawing the current one if it hasn't started. */
+export function setSeeding(t: Tournament, seeding: Seeding, rng: Rng): Tournament {
+  const next = { ...t, seeding }
+  return canReseed(next) ? redraw(next, rng) : next
 }
 
 export function canUndo(t: Tournament): boolean {
@@ -351,7 +486,6 @@ export function bracketRoundName(matches: number): string {
 export function roundName(t: Tournament, r: number): string {
   const round = t.rounds[r]
   if (round.kind === 'bracket') return bracketRoundName(round.groups.length)
-  const isPlayIn = (x: Round) => x.groups.every((g) => g.songs.length <= 2)
   if (isPlayIn(round)) return 'Play-in'
   return `Round ${t.rounds.slice(0, r + 1).filter((x) => x.kind === 'groups' && !isPlayIn(x)).length}`
 }

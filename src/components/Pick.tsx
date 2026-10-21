@@ -3,12 +3,15 @@ import {
   type Group,
   type Round,
   type Tournament,
+  type Seeding,
   canRedraw,
+  canReseed,
   canUndo,
   currentRound,
   picksLeft,
   picksMade,
   roundName,
+  seedNumbers,
   wildcardLimit,
 } from '../engine'
 import { useStore, useTournament } from '../store'
@@ -19,6 +22,7 @@ export function Pick() {
   const decide = useStore((s) => s.decide)
   const undo = useStore((s) => s.undo)
   const redraw = useStore((s) => s.redraw)
+  const setSeeding = useStore((s) => s.setSeeding)
   const [playing, setPlaying] = useState<string | null>(null)
 
   const r = t.rounds.length - 1
@@ -46,7 +50,20 @@ export function Pick() {
           <span className="muted">
             {done.toLocaleString()} picks made · about {left.toLocaleString()} to go
           </span>
-          {canRedraw(t) && (
+          {canReseed(t) ? (
+            <span className="seeding">
+              <select
+                value={t.seeding ?? 'rated'}
+                onChange={(e) => setSeeding(e.target.value as Seeding)}
+                aria-label={`How the ${roundName(t, r)} is drawn`}
+                title="Seeded draws use ratings from all your picks so far. You can switch until your first pick in this round."
+              >
+                <option value="rated">Seeded by your picks</option>
+                <option value="random">Random draw</option>
+              </select>
+              {t.seeding === 'random' && <button onClick={redraw}>Redraw</button>}
+            </span>
+          ) : canRedraw(t) && (
             <button
               className="redraw"
               title="Shuffle this round's groups again. Only possible before your first pick in the round."
@@ -99,6 +116,13 @@ function GroupPicker({
   const [winner, setWinner] = useState<string | null>(null)
   const [wild, setWild] = useState<string[]>([])
   const limit = wildcardLimit(round, group)
+  const seeds = seedNumbers(t)
+  const bracketRatings = t.rounds.find((b) => b.kind === 'bracket')?.ratings
+  const seedLabel = (id: string) => {
+    const seed = seeds.get(id)
+    const rating = round.ratings?.[id] ?? bracketRatings?.[id]
+    return [seed && `Seed ${seed}`, rating && `Rating ${rating}`].filter(Boolean).join(' · ')
+  }
 
   const choose = (id: string) => {
     setWinner(id)
@@ -164,6 +188,7 @@ function GroupPicker({
             >
               <div className="card-top">
                 <span className="key">{i + 1}</span>
+                {seedLabel(id) && <span className="seed">{seedLabel(id)}</span>}
                 {isWinner && <span className="badge win">Winner</span>}
                 {isWild && <span className="badge wild">★ Wildcard</span>}
               </div>

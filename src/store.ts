@@ -10,6 +10,7 @@ interface State {
   pickPlace: (song: string) => void
   undo: () => void
   redraw: () => void
+  setSeeding: (seeding: engine.Seeding) => void
   load: (t: Tournament) => void
   reset: () => void
 }
@@ -29,6 +30,7 @@ export const useStore = create<State>()(
         pickPlace: (song) => update((t) => engine.pickPlace(t, song)),
         undo: () => update(engine.undo),
         redraw: () => update((t) => engine.redraw(t, Math.random)),
+        setSeeding: (seeding) => update((t) => engine.setSeeding(t, seeding, Math.random)),
         load: (tournament) => set({ tournament }),
         reset: () => set({ tournament: null }),
       }

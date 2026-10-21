@@ -3,19 +3,25 @@ import {
   type Song,
   type Tournament,
   canRedraw,
+  canReseed,
   canUndo,
   currentRound,
   deal,
   dealGroups,
   decide,
   eliminations,
+  isPlayIn,
   pickPlace,
   redraw,
   placeCandidates,
   picksLeft,
   picksMade,
   plan,
+  ratings,
   roundName,
+  seedNumbers,
+  seedOrder,
+  setSeeding,
   startTournament,
   undo,
   wildcardLimit,
@@ -101,10 +107,98 @@ describe('dealGroups', () => {
   })
 })
 
+describe('seeding', () => {
+  /** Plays until the bracket is drawn, picking the lowest-numbered song and wildcarding strong runners-up. */
+  function toBracket(seeding?: 'rated' | 'random', seed = 31) {
+    const rng = seeded(seed)
+    const rank = (id: string) => Number(id.slice(1))
+    let t: Tournament = { ...startTournament(songs(1387), rng), seeding }
+    let playIn: Tournament | null = null
+    while (currentRound(t).kind !== 'bracket') {
+      const round = currentRound(t)
+      if (isPlayIn(round) && !playIn) playIn = t
+      const gi = round.groups.findIndex((g) => !g.winner)
+      const g = round.groups[gi]
+      const sorted = g.songs.slice().sort((a, b) => rank(a) - rank(b))
+      const wild = wildcardLimit(round, g) > 0 && rank(sorted[1]) < 60 ? [sorted[1]] : []
+      t = decide(t, gi, sorted[0], wild, rng)
+    }
+    return { t, playIn: playIn! }
+  }
+
+  it('orders seeds so the top two meet last', () => {
+    expect(seedOrder(8)).toEqual([1, 8, 4, 5, 2, 7, 3, 6])
+    expect(seedOrder(64).slice(0, 4)).toEqual([1, 64, 32, 33])
+  })
+
+  it('rates songs by who they beat', () => {
+    const { t } = toBracket()
+    const r = ratings(t)
+    const order = [...r.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id)
+    // Unbeaten songs are told apart only by who they beat, so the true #1 lands near, not at, the top.
+    expect(order.indexOf('s0')).toBeLessThan(64)
+    const avg = (from: number) => Array.from({ length: 10 }, (_, i) => r.get(`s${from + i}`)!).reduce((a, b) => a + b) / 10
+    expect(avg(0)).toBeGreaterThan(avg(50))
+    expect(avg(50)).toBeGreaterThan(avg(500))
+    expect(r.get('s0')!).toBeGreaterThan(r.get('s500')!)
+    expect(r.get('s100')!).toBeGreaterThan(r.get('s1300')!)
+  })
+
+  it('seeds the bracket 1 v 64 with ratings attached', () => {
+    const { t } = toBracket()
+    const bracket = currentRound(t)
+    expect(bracket.seeds).toHaveLength(64)
+    const trueRank = (ids: string[]) => ids.reduce((sum, id) => sum + Number(id.slice(1)), 0) / ids.length
+    expect(trueRank(bracket.seeds!.slice(0, 16))).toBeLessThan(trueRank(bracket.seeds!.slice(48)))
+    const seeds = seedNumbers(t)
+    for (const g of bracket.groups) expect(seeds.get(g.songs[0])! + seeds.get(g.songs[1])!).toBe(65)
+    const top = bracket.groups.findIndex((g) => g.songs.includes(bracket.seeds![0]))
+    const second = bracket.groups.findIndex((g) => g.songs.includes(bracket.seeds![1]))
+    expect(top < 16).not.toBe(second < 16)
+    expect(Object.keys(bracket.ratings!)).toHaveLength(64)
+  })
+
+  it('gives the play-in byes to the best winners and pits wildcards against the weakest', () => {
+    const { playIn } = toBracket()
+    const round = currentRound(playIn)
+    const prev = playIn.rounds[playIn.rounds.length - 2]
+    const winners = new Set(prev.groups.map((g) => g.winner))
+    const matches = round.groups.filter((g) => g.songs.length === 2)
+    expect(matches.length).toBeGreaterThan(0)
+    for (const m of matches) {
+      expect(m.songs.filter((s) => winners.has(s))).toHaveLength(1)
+      const from = (s: string) => prev.groups.findIndex((g) => g.songs.includes(s))
+      expect(from(m.songs[0])).not.toBe(from(m.songs[1]))
+    }
+    const rating = round.ratings!
+    const byes = round.groups.filter((g) => g.songs.length === 1).map((g) => rating[g.songs[0]])
+    const defenders = matches.map((m) => rating[m.songs.find((s) => winners.has(s))!])
+    expect(Math.min(...byes)).toBeGreaterThanOrEqual(Math.max(...defenders))
+  })
+
+  it('can switch to a random draw before the round starts', () => {
+    const { t } = toBracket()
+    expect(canReseed(t)).toBe(true)
+    const random = setSeeding(t, 'random', seeded(5))
+    expect(currentRound(random).seeds).toBeUndefined()
+    expect(currentRound(random).groups.flatMap((g) => g.songs).sort()).toEqual(
+      currentRound(t).groups.flatMap((g) => g.songs).sort(),
+    )
+    const back = setSeeding(random, 'rated', seeded(6))
+    expect(currentRound(back).seeds).toEqual(currentRound(t).seeds)
+  })
+
+  it('keeps old random behaviour when seeding is off', () => {
+    const { t } = toBracket('random')
+    expect(currentRound(t).seeds).toBeUndefined()
+    expect(currentRound(t).groups).toHaveLength(32)
+  })
+})
+
 describe('redraw', () => {
   it('redraws a round with no picks from the previous round', () => {
     const rng = seeded(21)
-    let t = startTournament(songs(300), rng)
+    let t: Tournament = { ...startTournament(songs(300), rng), seeding: 'random' }
     expect(canRedraw(t)).toBe(false)
     currentRound(t).groups.forEach((g, i) => {
       t = decide(t, i, g.songs[0], g.songs.length > 3 && i % 3 === 0 ? [g.songs[1]] : [], rng)

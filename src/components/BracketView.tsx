@@ -1,4 +1,4 @@
-import { BRACKET_SIZE, bracketRoundName } from '../engine'
+import { BRACKET_SIZE, bracketRoundName, seedNumbers } from '../engine'
 import { useTournament } from '../store'
 
 export function BracketView() {
@@ -8,6 +8,8 @@ export function BracketView() {
     return <p className="muted empty">The bracket starts once {BRACKET_SIZE} songs are left.</p>
 
   const first = t.rounds[start].groups.length
+  const seeds = seedNumbers(t)
+  const ratings = t.rounds[start].ratings
   const columns: number[] = []
   for (let m = first; m >= 1; m /= 2) columns.push(m)
 
@@ -28,8 +30,13 @@ export function BracketView() {
                       <div
                         key={k}
                         className={`slot ${id && g?.winner === id && g.songs.length > 1 ? 'is-winner' : ''} ${id && g?.winner && g.winner !== id ? 'is-loser' : ''}`}
-                        title={id ? `${t.songs[id].title} — ${t.songs[id].artist}` : undefined}
+                        title={
+                          id
+                            ? `${t.songs[id].title} — ${t.songs[id].artist}${ratings?.[id] ? ` (rating ${ratings[id]})` : ''}`
+                            : undefined
+                        }
                       >
+                        {id && seeds.has(id) && <span className="seed-num">{seeds.get(id)}</span>}
                         {id ? t.songs[id].title : id === null ? <span className="muted">bye</span> : ' '}
                       </div>
                     ))}
