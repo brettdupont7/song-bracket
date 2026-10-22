@@ -13,7 +13,9 @@ Put every song in a playlist into a tournament to find your favourite song right
 
 A 1,387-song playlist takes 347 + 64 + 63 = **474 picks** before wildcards, plus one per extra place.
 
-**Keys:** `1`–`9` pick the winner, `Shift`+number toggles a wildcard, `Enter` confirms, `Backspace` (or ⌘Z) undoes the last pick. Songs with a Spotify link have a **Play** button that loads Spotify's embedded player: full tracks if you're logged in to Spotify in the browser, previews otherwise.
+**Keys:** `1`–`9` pick the winner, `Shift`+number toggles a wildcard, `Option`+number rules a song out, `Enter` confirms, `Backspace` (or ⌘Z) undoes the last pick. Songs with a Spotify link have a **Play** button that loads Spotify's embedded player: full tracks if you're logged in to Spotify in the browser, previews otherwise.
+
+**Rule out** (on each card in groups of 3 or more) tints a song red to show it's out of contention. It's only a note for you while you decide: it doesn't affect the pick, and choosing or wildcarding the song brings it back in.
 
 **Tabs:** **Pick** (or **Results** once there's a champion), **Bracket** for the last 64, and **Rounds** for each round's picks, wildcards and the rounds still to come.
 

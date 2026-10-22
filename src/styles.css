@@ -12,6 +12,7 @@
   --wild-bg: rgba(245, 185, 66, 0.14);
   --win-bg: rgba(30, 215, 96, 0.14);
   --danger: #e5483a;
+  --out: #e5483a;
   --radius: 8px;
 }
 
@@ -29,6 +30,7 @@
     --wild: #b07a0c;
     --wild-bg: rgba(214, 150, 20, 0.14);
     --win-bg: rgba(18, 168, 74, 0.12);
+    --out: #c8402f;
   }
 }
 
@@ -313,6 +315,30 @@ table.plan {
 .song-card.is-wild {
   border-color: var(--wild);
   background: var(--wild-bg);
+}
+
+/* Ruled out: a red tinge and a slightly darker card, text still fully readable. */
+.song-card.is-out {
+  background: color-mix(in srgb, var(--out) 16%, var(--surface));
+  border-color: color-mix(in srgb, var(--out) 45%, var(--border));
+  filter: brightness(0.88);
+}
+
+.song-card.is-out:hover {
+  border-color: var(--out);
+}
+
+.badge.out {
+  color: var(--out);
+}
+
+button.is-on.out {
+  border-color: var(--out);
+  color: var(--out);
+}
+
+.card-actions .rule-out {
+  margin-left: auto;
 }
 
 .card-top {

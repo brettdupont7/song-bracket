@@ -96,6 +96,9 @@ export function Pick() {
   )
 }
 
+/** Songs ruled out in each group, kept while the page is open so switching tabs doesn't lose them. */
+const ruledOutByGroup = new WeakMap<Group, string[]>()
+
 function GroupPicker({
   t,
   round,
@@ -115,6 +118,7 @@ function GroupPicker({
 }) {
   const [winner, setWinner] = useState<string | null>(null)
   const [wild, setWild] = useState<string[]>([])
+  const [ruledOut, setRuledOut] = useState<string[]>(() => ruledOutByGroup.get(group) ?? [])
   const limit = wildcardLimit(round, group)
   const seeds = seedNumbers(t)
   const bracketRatings = t.rounds.find((b) => b.kind === 'bracket')?.ratings
@@ -124,13 +128,30 @@ function GroupPicker({
     return [seed && `Seed ${seed}`, rating && `Rating ${rating}`].filter(Boolean).join(' · ')
   }
 
+  // Ruling a song out is only a visual note to yourself; it doesn't affect the pick.
+  const setRuled = (update: (ids: string[]) => string[]) =>
+    setRuledOut((ids) => {
+      const next = update(ids)
+      ruledOutByGroup.set(group, next)
+      return next
+    })
+  const unrule = (id: string) => setRuled((ids) => ids.filter((x) => x !== id))
+  const toggleRuledOut = (id: string) => {
+    if (ruledOut.includes(id)) return unrule(id)
+    setRuled((ids) => [...ids, id])
+    if (winner === id) setWinner(null)
+    setWild((w) => w.filter((x) => x !== id))
+  }
   const choose = (id: string) => {
     setWinner(id)
     setWild((w) => w.filter((x) => x !== id))
+    unrule(id)
   }
   const toggleWild = (id: string) => {
     if (limit === 0 || id === winner) return
-    setWild((w) => (w.includes(id) ? w.filter((x) => x !== id) : w.length < limit ? [...w, id] : w))
+    if (!wild.includes(id) && wild.length >= limit) return
+    setWild((w) => (w.includes(id) ? w.filter((x) => x !== id) : [...w, id]))
+    unrule(id)
   }
   const confirm = () => winner && onConfirm(winner, wild)
 
@@ -142,7 +163,8 @@ function GroupPicker({
         const id = group.songs[Number(digit[1]) - 1]
         if (!id) return
         e.preventDefault()
-        if (e.shiftKey) toggleWild(id)
+        if (e.altKey) toggleRuledOut(id)
+        else if (e.shiftKey) toggleWild(id)
         else choose(id)
       } else if (e.key === 'Enter' && winner) {
         e.preventDefault()
@@ -178,10 +200,11 @@ function GroupPicker({
           const song = t.songs[id]
           const isWinner = winner === id
           const isWild = wild.includes(id)
+          const isOut = ruledOut.includes(id)
           return (
             <div
               key={id}
-              className={`song-card ${isWinner ? 'is-winner' : ''} ${isWild ? 'is-wild' : ''}`}
+              className={`song-card ${isWinner ? 'is-winner' : ''} ${isWild ? 'is-wild' : ''} ${isOut ? 'is-out' : ''}`}
               role="button"
               tabIndex={0}
               onClick={() => choose(id)}
@@ -191,6 +214,7 @@ function GroupPicker({
                 {seedLabel(id) && <span className="seed">{seedLabel(id)}</span>}
                 {isWinner && <span className="badge win">Winner</span>}
                 {isWild && <span className="badge wild">★ Wildcard</span>}
+                {isOut && <span className="badge out">Ruled out</span>}
               </div>
               <SongLabel song={song} />
               {song.album && <span className="album">{song.album}</span>}
@@ -218,6 +242,18 @@ function GroupPicker({
                     ★ Wildcard
                   </button>
                 )}
+                {group.songs.length > 2 && (
+                  <button
+                    className={`rule-out ${isOut ? 'is-on out' : ''}`}
+                    title={isOut ? 'Back in contention' : 'Mark as not in contention (just a note for you)'}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggleRuledOut(id)
+                    }}
+                  >
+                    {isOut ? '↺ Back in' : '✕ Rule out'}
+                  </button>
+                )}
               </div>
             </div>
           )
@@ -227,7 +263,8 @@ function GroupPicker({
       <div className="picker-footer">
         {onUndo && <button onClick={onUndo}>↶ Undo last pick</button>}
         <span className="muted hint">
-          Keys: 1–{group.songs.length} pick{limit > 0 ? ', Shift+number wildcard' : ''}, Enter confirm, Backspace undo
+          Keys: 1–{group.songs.length} pick{limit > 0 ? ', Shift+number wildcard' : ''}
+          {group.songs.length > 2 ? ', Option+number rule out' : ''}, Enter confirm, Backspace undo
         </span>
         <button className="primary" disabled={!winner} onClick={confirm}>
           {wild.length ? `Advance ${wild.length + 1} songs` : 'Advance'} ⏎
